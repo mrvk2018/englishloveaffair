@@ -327,6 +327,42 @@ async function readSettingsRow() {
   );
 }
 
+function telegramCredentials(settings) {
+  const token = String(settings?.tg_bot_token || "").trim();
+  const adminId = String(settings?.tg_admin_id || "").trim() || DEFAULT_TG_ADMIN_ID.trim();
+  return { token, adminId };
+}
+
+async function postTelegramMessage(token, adminId, text) {
+  const botToken = String(token || "").trim();
+  const chatId = String(adminId || "").trim();
+  if (!botToken || !chatId) {
+    throw fail("Telegram преподавателя ещё не настроен. Сообщение не отправлено", 503);
+  }
+  let response;
+  try {
+    response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch {
+    throw fail("Не удалось доставить сообщение преподавателю. Попробуйте ещё раз чуть позже", 502);
+  }
+  if (!response.ok) throw fail("Не удалось доставить сообщение преподавателю. Попробуйте ещё раз чуть позже", 502);
+}
+
+/** Проверка доставки: в консоли браузера — await sendTestTelegramMessage() */
+async function sendTestTelegramMessage() {
+  const settings = await readSettingsRow();
+  const { token, adminId } = telegramCredentials(settings);
+  if (!token) throw new Error("Токен TG-бота не задан. Сохраните его во вкладке «Настройки».");
+  await postTelegramMessage(token, adminId, "Тест интеграции English Love Affair 🚀");
+  return { ok: true, chat_id: adminId };
+}
+
+window.sendTestTelegramMessage = sendTestTelegramMessage;
+
 function toast(message, tone = "neutral") {
   state.toast = message;
   state.toastTone = tone;
@@ -758,6 +794,7 @@ function renderSettings() {
       </label>
       <button type="submit" class="${btnPrimary}">Сохранить</button>
     </form>
+    <button type="button" data-action="test-telegram" class="${btnSoft} mt-3">Тест Telegram</button>
     <button type="button" data-action="make-qr" class="${btnSoft} mt-3">Сгенерировать рекламный QR-код сайта</button>
     <div id="qr-box" class="qr-box ${card} mt-3 hidden p-5 text-center"></div>`;
 }
@@ -1037,6 +1074,11 @@ function onClick(event) {
     "confirm-archive": () => guard(() => archiveStudent(node.dataset.id)),
     "copy-code": () => guard(() => copyCode(node.dataset.code)),
     "make-qr": () => makeQr(),
+    "test-telegram": () =>
+      guard(async () => {
+        await sendTestTelegramMessage();
+        toast("Тестовое сообщение отправлено в Telegram", "success");
+      }),
   };
   const handler = handlers[action];
   if (!handler) return;
@@ -1162,21 +1204,9 @@ async function sendTeacherMessage(accessCode, message) {
   }
   if (student.status !== "active") throw fail("Писать могут только активные ученики", 403);
   const settings = await readSettingsRow();
-  const token = String(settings.tg_bot_token || "").trim();
-  const adminId = String(settings.tg_admin_id || "").trim();
-  if (!token || !adminId) throw fail("Telegram преподавателя ещё не настроен. Сообщение не отправлено", 503);
+  const { token, adminId } = telegramCredentials(settings);
   const text = `💬 Сообщение от ученика ${student.name} (Код: ${student.access_code}): ${message}`;
-  let response;
-  try {
-    response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: adminId, text }),
-    });
-  } catch {
-    throw fail("Не удалось доставить сообщение преподавателю. Попробуйте ещё раз чуть позже", 502);
-  }
-  if (!response.ok) throw fail("Не удалось доставить сообщение преподавателю. Попробуйте ещё раз чуть позже", 502);
+  await postTelegramMessage(token, adminId, text);
 }
 
 async function bookSlot(node) {
