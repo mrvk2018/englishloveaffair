@@ -1,4 +1,9 @@
-const API_URL = "http://127.0.0.1:8000";
+import { createClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = ["https://", "fvevqbydlymyermvloun", ".", "supabase", ".", "co"].join("");
+const SUPABASE_KEY = "sb_publishable_nA7SfNO5xsrJeF4W3ttLsw_Um9j2aJM";
+const ADMIN_PASSWORD = "988811";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const QR_LINK = ["https://", "mrvk2018", ".", "github", ".", "io", "/", "englishloveaffair", "/"].join("");
 const CALENDAR_FLOOR = "2026-10-20";
 const HOURS = Array.from({ length: 13 }, (_, index) => String(index + 9).padStart(2, "0"));
@@ -228,45 +233,98 @@ function applyCalendarMeta() {
   if (!state.visibleMonth) state.visibleMonth = state.calendarStart.slice(0, 7);
 }
 
-function errorText(data) {
-  if (!data) return "Не удалось выполнить запрос";
-  if (typeof data.detail === "string") return data.detail;
-  if (Array.isArray(data.detail)) {
-    return data.detail.map((item) => item.msg || "Проверьте поля формы").join(". ");
-  }
-  return "Не удалось выполнить запрос";
+function fail(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
-async function api(path, { method = "GET", body, auth = false } = {}) {
-  const headers = { Accept: "application/json" };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (auth) {
-    if (!state.adminToken) throw new Error("Нужен вход преподавателя");
-    headers.Authorization = `Bearer ${state.adminToken}`;
-  }
-  let response;
+function ensureAdmin() {
+  if (!state.adminToken) throw new Error("Нужен вход преподавателя");
+}
+
+async function query(builder) {
+  let result;
   try {
-    response = await fetch(`${API_URL}${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    result = await builder;
   } catch {
-    throw new Error("Сервер недоступен. Запустите бэкенд на 127.0.0.1:8000");
+    throw new Error("Не удалось связаться с Supabase. Проверьте адрес проекта.");
   }
-  const data = response.status === 204 ? null : await response.json().catch(() => ({}));
-  if (response.status === 401 && auth) {
-    state.adminToken = "";
-    localStorage.removeItem("ela_admin_token");
-    if (state.screen === "admin") setScreen("home");
-    throw new Error("Сессия преподавателя закончилась. Войдите снова.");
+  if (result.error) {
+    const message = result.error.message || "Не удалось выполнить запрос";
+    if (/fetch|network|failed to fetch|name resolution/i.test(message)) {
+      throw new Error("Не удалось связаться с Supabase. Проверьте адрес проекта.");
+    }
+    throw fail(message, result.error.code === "PGRST116" ? 404 : 400);
   }
-  if (!response.ok) {
-    const error = new Error(errorText(data));
-    error.status = response.status;
-    throw error;
+  return result.data;
+}
+
+function calendarStartValue() {
+  const today = toIso(new Date());
+  const day = today > CALENDAR_FLOOR ? today : CALENDAR_FLOOR;
+  return `${day}T00:00:00`;
+}
+
+async function loadSlots({ withNames = false } = {}) {
+  const start = calendarStartValue();
+  const select = withNames ? "id, datetime, status, student_id, students(name)" : "id, datetime, status, student_id";
+  const rows = await query(supabase.from("slots").select(select).gte("datetime", start).order("datetime", { ascending: true }));
+  const slots = (rows || []).map((slot) => ({
+    id: slot.id,
+    datetime: slot.datetime,
+    status: slot.status,
+    student_id: slot.student_id,
+    student_name: withNames ? slot.students?.name || null : null,
+  }));
+  const available = [...new Set(slots.filter((slot) => slot.status === "free").map((slot) => String(slot.datetime).slice(0, 10)))].sort();
+  return { calendar_start: start.slice(0, 10), available_dates: available, slots };
+}
+
+async function findStudent(rawCode) {
+  const code = String(rawCode || "").trim().toUpperCase();
+  const student = await query(supabase.from("students").select("*").eq("access_code", code).maybeSingle());
+  if (!student) throw fail("Ученик с таким кодом не найден", 404);
+  return student;
+}
+
+function messengerFromRequest(item) {
+  if (item.messenger_type === "Custom") return (item.custom_messenger_text || "Custom").trim();
+  const extra = String(item.custom_messenger_text || "").trim();
+  return extra ? `${item.messenger_type} (${extra})` : item.messenger_type;
+}
+
+function applyBalance(current, raw) {
+  const updated = raw.startsWith("+") || raw.startsWith("-") ? current + Number(raw) : Number(raw);
+  if (!Number.isInteger(updated)) throw new Error("Введите число, +3 или -1");
+  if (updated < 0) throw new Error("Баланс не может быть отрицательным");
+  if (updated > 10000) throw new Error("Баланс не может быть больше 10000");
+  return updated;
+}
+
+async function generateAccessCode() {
+  for (const width of [3, 4]) {
+    const min = 10 ** (width - 1);
+    const span = 10 ** width - min;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const code = `ELA-${min + Math.floor(Math.random() * span)}`;
+      const existing = await query(supabase.from("students").select("id").eq("access_code", code).maybeSingle());
+      if (!existing) return code;
+    }
   }
-  return data;
+  throw new Error("Не удалось сгенерировать код доступа");
+}
+
+async function readSettingsRow() {
+  const row = await query(supabase.from("settings").select("*").order("id", { ascending: true }).limit(1).maybeSingle());
+  if (row) return row;
+  return query(
+    supabase
+      .from("settings")
+      .insert({ tg_bot_token: "", tg_admin_id: DEFAULT_TG_ADMIN_ID, notifications_enabled: false })
+      .select()
+      .single()
+  );
 }
 
 function toast(message, tone = "neutral") {
@@ -891,7 +949,7 @@ async function loadStudentSlots({ quiet = false } = {}) {
     render();
   }
   try {
-    state.slotsPayload = await api("/api/slots");
+    state.slotsPayload = await loadSlots();
     applyCalendarMeta();
   } finally {
     state.loading = false;
@@ -903,15 +961,20 @@ async function loadAdminTab() {
   state.loading = true;
   render();
   try {
+    ensureAdmin();
     if (state.adminTab === "schedule") {
-      state.slotsPayload = await api("/api/slots", { auth: true });
+      state.slotsPayload = await loadSlots({ withNames: true });
       applyCalendarMeta();
     } else if (state.adminTab === "requests") {
-      state.requests = await api("/api/admin/requests", { auth: true });
+      state.requests = await query(supabase.from("requests").select("*").order("created_at", { ascending: false }).order("id", { ascending: false }));
     } else if (state.adminTab === "students") {
-      state.students = await api("/api/admin/students", { auth: true });
+      const rows = await query(supabase.from("students").select("*").order("id", { ascending: false }));
+      state.students = {
+        active: rows.filter((student) => student.status === "active"),
+        archived: rows.filter((student) => student.status === "archived"),
+      };
     } else if (state.adminTab === "settings") {
-      state.settings = settingsWithDefault(await api("/api/admin/settings", { auth: true }));
+      state.settings = settingsWithDefault(await readSettingsRow());
     }
   } finally {
     state.loading = false;
@@ -1023,9 +1086,8 @@ async function submitTrial(form) {
     setModalError("Укажите название мессенджера");
     return;
   }
-  await api("/api/requests", {
-    method: "POST",
-    body: {
+  await query(
+    supabase.from("requests").insert({
       name: String(data.get("name") || "").trim(),
       phone: String(data.get("phone") || "").trim(),
       messenger_type: messenger,
@@ -1033,18 +1095,15 @@ async function submitTrial(form) {
       language_level: String(data.get("language_level") || "").trim(),
       timezone: String(data.get("timezone") || "").trim(),
       schedule_wishes: String(data.get("schedule_wishes") || "").trim(),
-    },
-  });
+    })
+  );
   closeModal();
   toast("Заявка отправлена. Скоро свяжусь с вами.");
 }
 
 async function submitLogin(form) {
   const accessCode = String(new FormData(form).get("access_code") || "").trim();
-  const student = await api("/api/auth/student", {
-    method: "POST",
-    body: { access_code: accessCode },
-  });
+  const student = await findStudent(accessCode);
   rememberStudent(student);
   state.selectedDate = "";
   state.visibleMonth = "";
@@ -1056,12 +1115,9 @@ async function submitLogin(form) {
 
 async function submitAdmin(form) {
   const password = String(new FormData(form).get("password") || "");
-  const result = await api("/api/auth/admin", {
-    method: "POST",
-    body: { password },
-  });
-  state.adminToken = result.token;
-  localStorage.setItem("ela_admin_token", result.token);
+  if (password !== ADMIN_PASSWORD) throw new Error("Неверный пароль");
+  state.adminToken = crypto.randomUUID();
+  localStorage.setItem("ela_admin_token", state.adminToken);
   state.adminTab = "schedule";
   sessionStorage.setItem("ela_admin_tab", "schedule");
   closeModal();
@@ -1076,10 +1132,7 @@ async function sendStudentMessage(form) {
   const accessCode = state.student?.access_code;
   if (!accessCode) throw new Error("Нужен вход ученика");
   try {
-    await api("/api/students/message", {
-      method: "POST",
-      body: { access_code: accessCode, message },
-    });
+    await sendTeacherMessage(accessCode, message);
   } catch (error) {
     if (error.status === 403) {
       forgetStudent();
@@ -1098,12 +1151,65 @@ async function sendStudentMessage(form) {
   toast("Сообщение успешно отправлено преподавателю в Telegram!", "success");
 }
 
+async function sendTeacherMessage(accessCode, message) {
+  const student = await findStudent(accessCode);
+  if (student.status === "archived") {
+    throw fail(
+      "Доступ запрещен. Архивные ученики не могут писать из этого раздела, они должны использовать общую форму на главной странице",
+      403
+    );
+  }
+  if (student.status !== "active") throw fail("Писать могут только активные ученики", 403);
+  const settings = await readSettingsRow();
+  const token = String(settings.tg_bot_token || "").trim();
+  const adminId = String(settings.tg_admin_id || "").trim();
+  if (!token || !adminId) throw fail("Telegram преподавателя ещё не настроен. Сообщение не отправлено", 503);
+  const text = `💬 Сообщение от ученика ${student.name} (Код: ${student.access_code}): ${message}`;
+  let response;
+  try {
+    response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: adminId, text }),
+    });
+  } catch {
+    throw fail("Не удалось доставить сообщение преподавателю. Попробуйте ещё раз чуть позже", 502);
+  }
+  if (!response.ok) throw fail("Не удалось доставить сообщение преподавателю. Попробуйте ещё раз чуть позже", 502);
+}
+
 async function bookSlot(node) {
-  const result = await api("/api/slots/book", {
-    method: "POST",
-    body: { access_code: state.student.access_code, slot_id: Number(node.dataset.id) },
-  });
-  state.student.lessons_balance = result.lessons_balance;
+  const student = await findStudent(state.student.access_code);
+  if (student.status !== "active") throw fail("Аккаунт в архиве — запись недоступна", 403);
+  if (student.lessons_balance <= 0) throw new Error("Недостаточно уроков на балансе");
+  const slot = await query(supabase.from("slots").select("*").eq("id", Number(node.dataset.id)).maybeSingle());
+  if (!slot) throw fail("Слот не найден", 404);
+  const when = String(slot.datetime);
+  if (when.slice(0, 10) < CALENDAR_FLOOR || isPast(when.slice(0, 10), when.slice(11, 16))) {
+    throw new Error("Это время уже прошло");
+  }
+  if (slot.status === "blocked_by_admin") throw new Error("Это время заблокировано преподавателем");
+  if (slot.status === "booked") throw new Error("Это время уже занято");
+  if (slot.status !== "free") throw new Error("Слот недоступен для записи");
+  const booked = await query(
+    supabase.from("slots").update({ status: "booked", student_id: student.id }).eq("id", slot.id).eq("status", "free").select().maybeSingle()
+  );
+  if (!booked) throw new Error("Это время только что заняли");
+  const charged = await query(
+    supabase
+      .from("students")
+      .update({ lessons_balance: student.lessons_balance - 1 })
+      .eq("id", student.id)
+      .eq("status", "active")
+      .gt("lessons_balance", 0)
+      .select()
+      .maybeSingle()
+  );
+  if (!charged) {
+    await query(supabase.from("slots").update({ status: "free", student_id: null }).eq("id", slot.id));
+    throw new Error("Недостаточно уроков на балансе");
+  }
+  state.student.lessons_balance = charged.lessons_balance;
   rememberStudent(state.student);
   await loadStudentSlots({ quiet: true });
   toast(`Урок забронирован: ${node.dataset.label}`);
@@ -1112,26 +1218,62 @@ async function bookSlot(node) {
 async function toggleSlot(node) {
   node.disabled = true;
   const mode = node.dataset.mode;
-  const result = await api("/api/admin/slots/manage", {
-    method: "POST",
-    auth: true,
-    body: { action: mode, datetimes: [node.dataset.datetime] },
-  });
+  const result = await manageSlot(mode, node.dataset.datetime);
   if (!result.created.length && !result.updated.length) {
     throw new Error(result.skipped[0]?.reason || "Не удалось изменить слот");
   }
-  state.slotsPayload = await api("/api/slots", { auth: true });
+  state.slotsPayload = await loadSlots({ withNames: true });
   applyCalendarMeta();
   render();
   toast(mode === "open" ? "Слот открыт" : "Слот заблокирован");
 }
 
+async function manageSlot(action, datetime) {
+  ensureAdmin();
+  const when = datetime.length === 16 ? `${datetime}:00` : datetime;
+  const existing = await query(supabase.from("slots").select("*").eq("datetime", when).maybeSingle());
+  const created = [];
+  const updated = [];
+  const skipped = [];
+  if (!existing) {
+    const status = action === "block" ? "blocked_by_admin" : "free";
+    const row = await query(supabase.from("slots").insert({ datetime: when, status, student_id: null }).select().maybeSingle());
+    if (row) created.push(row);
+    else skipped.push({ reason: "Не удалось открыть слот" });
+  } else if (existing.status === "booked") {
+    skipped.push({ reason: "Слот забронирован учеником" });
+  } else if (action === "open" && existing.status === "free") {
+    skipped.push({ reason: "Слот уже открыт" });
+  } else if (action === "block" && existing.status === "blocked_by_admin") {
+    skipped.push({ reason: "Слот уже заблокирован" });
+  } else {
+    const status = action === "block" ? "blocked_by_admin" : "free";
+    const row = await query(
+      supabase.from("slots").update({ status, student_id: null }).eq("id", existing.id).select().single()
+    );
+    updated.push(row);
+  }
+  return { created, updated, deleted: [], skipped };
+}
+
 async function approveRequest(id) {
-  const student = await api("/api/admin/students", {
-    method: "POST",
-    auth: true,
-    body: { request_id: Number(id), lessons_balance: 0 },
-  });
+  ensureAdmin();
+  const source = await query(supabase.from("requests").select("*").eq("id", Number(id)).maybeSingle());
+  if (!source) throw fail("Заявка не найдена", 404);
+  const student = await query(
+    supabase
+      .from("students")
+      .insert({
+        name: source.name,
+        phone: source.phone,
+        messenger: messengerFromRequest(source),
+        access_code: await generateAccessCode(),
+        lessons_balance: 0,
+        status: "active",
+      })
+      .select()
+      .single()
+  );
   state.approved[id] = student.access_code;
   sessionStorage.setItem("ela_approved", JSON.stringify(state.approved));
   render();
@@ -1139,20 +1281,25 @@ async function approveRequest(id) {
 }
 
 async function saveBalance(form) {
+  ensureAdmin();
   const value = String(new FormData(form).get("value") || "").trim().replaceAll(" ", "");
   if (!/^[+-]?\d+$/.test(value)) throw new Error("Введите число, +3 или -1");
-  const student = await api(`/api/admin/students/${form.dataset.id}/balance`, {
-    method: "PUT",
-    auth: true,
-    body: { value },
-  });
+  const current = await query(supabase.from("students").select("*").eq("id", Number(form.dataset.id)).maybeSingle());
+  if (!current) throw fail("Ученик не найден", 404);
+  const student = await query(
+    supabase.from("students").update({ lessons_balance: applyBalance(current.lessons_balance, value) }).eq("id", current.id).select().single()
+  );
   patchStudent(student);
   render();
   toast("Баланс обновлён");
 }
 
 async function archiveStudent(id) {
-  const student = await api(`/api/admin/students/${id}/archive`, { method: "PUT", auth: true });
+  ensureAdmin();
+  const current = await query(supabase.from("students").select("*").eq("id", Number(id)).maybeSingle());
+  if (!current) throw fail("Ученик не найден", 404);
+  if (current.status === "archived") throw new Error("Ученик уже в архиве");
+  const student = await query(supabase.from("students").update({ status: "archived" }).eq("id", current.id).select().single());
   patchStudent(student);
   closeModal();
   render();
@@ -1168,15 +1315,16 @@ function patchStudent(student) {
 
 async function saveSettings(form) {
   const data = new FormData(form);
-  state.settings = await api("/api/admin/settings", {
-    method: "POST",
-    auth: true,
-    body: {
-      tg_bot_token: String(data.get("tg_bot_token") || "").trim(),
-      tg_admin_id: String(data.get("tg_admin_id") || "").trim(),
-      notifications_enabled: form.querySelector("#notifications").checked,
-    },
-  });
+  ensureAdmin();
+  const payload = {
+    tg_bot_token: String(data.get("tg_bot_token") || "").trim(),
+    tg_admin_id: String(data.get("tg_admin_id") || "").trim() || DEFAULT_TG_ADMIN_ID,
+    notifications_enabled: form.querySelector("#notifications").checked,
+  };
+  const current = await query(supabase.from("settings").select("id").order("id", { ascending: true }).limit(1).maybeSingle());
+  state.settings = current
+    ? await query(supabase.from("settings").update(payload).eq("id", current.id).select().single())
+    : await query(supabase.from("settings").insert(payload).select().single());
   render();
   toast("Настройки сохранены");
 }

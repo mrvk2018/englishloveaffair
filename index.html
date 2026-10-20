@@ -44,6 +44,13 @@
       <p class="px-6 py-10 text-center text-slate-600">Для сайта нужен JavaScript.</p>
     </noscript>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm"
+        }
+      }
+    </script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>
