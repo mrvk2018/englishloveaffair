@@ -413,9 +413,10 @@ function renderHome() {
         <section>
           <h2 class="mb-4 font-serif text-4xl text-slate-800">Обо мне</h2>
           <article class="${card} p-5 sm:p-8">
+            <p class="mb-4 text-center font-serif text-5xl font-medium leading-none text-rose-700 sm:text-6xl">Эля</p>
             <img
               src="teacher.jpg"
-              alt="Преподаватель English Love Affair"
+              alt="Эля, преподаватель English Love Affair"
               class="w-full cursor-default select-none rounded-2xl"
               draggable="false"
               data-action="secret-tap"
