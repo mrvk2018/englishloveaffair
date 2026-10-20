@@ -1,0 +1,110 @@
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f8fafc;
+  font-family: Manrope, sans-serif;
+}
+
+img {
+  max-width: 100%;
+}
+
+button,
+img {
+  touch-action: manipulation;
+}
+
+.fade-in {
+  animation: fade-in 0.35s ease;
+}
+
+.sheet-in {
+  animation: sheet-in 0.38s ease;
+}
+
+.toast-in {
+  animation: sheet-in 0.25s ease;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 2.75rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+  transition: background 0.2s ease;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 12%);
+  transition: transform 0.2s ease;
+}
+
+input:checked + .switch {
+  background: #f43f5e;
+}
+
+input:checked + .switch::after {
+  transform: translateX(1.15rem);
+}
+
+input:focus-visible + .switch {
+  outline: 2px solid #fecdd3;
+  outline-offset: 2px;
+}
+
+.tabs {
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.qr-box img,
+.qr-box canvas {
+  display: block;
+  margin: 0 auto;
+  border-radius: 1rem;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in,
+  .sheet-in,
+  .toast-in {
+    animation: none;
+  }
+}
