@@ -1,9 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = ["https://", "fvevqbydlymyermvloun", ".", "supabase", ".", "co"].join("");
-const SUPABASE_KEY = "sb_publishable_nA7SfNO5xsrJeF4W3ttLsw_Um9j2aJM";
+const SUPABASE_URL = "https://lvevqbydlymyermvleun.supabase.co".trim();
+const SUPABASE_ANON_KEY = "sb_publishable_nA7SfNO5xsrJeF4W3ttLsw_Um9j2aJM".trim();
 const ADMIN_PASSWORD = "988811";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const QR_LINK = ["https://", "mrvk2018", ".", "github", ".", "io", "/", "englishloveaffair", "/"].join("");
 const CALENDAR_FLOOR = "2026-10-20";
 const HOURS = Array.from({ length: 13 }, (_, index) => String(index + 9).padStart(2, "0"));
