@@ -6,7 +6,7 @@ const ADMIN_PASSWORD = "988811";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const QR_LINK = ["https://", "mrvk2018", ".", "github", ".", "io", "/", "englishloveaffair", "/"].join("");
 const CALENDAR_FLOOR = "2026-10-20";
-const HOURS = Array.from({ length: 13 }, (_, index) => String(index + 9).padStart(2, "0"));
+const HOURS = Array.from({ length: 16 }, (_, index) => String(index + 6).padStart(2, "0"));
 
 const MONTHS = [
   "января",
@@ -460,7 +460,7 @@ function renderHome() {
             <p class="mt-6 font-serif text-3xl text-slate-800">преподаватель английского</p>
             <p class="mt-4 text-[15px] leading-7 text-slate-600">я — человек с огромным количеством интересов. я постоянно в движении, много путешествую и обожаю открывать для себя что-то новое. на моих уроках — френдли-атмосфера. я создаю безопасное пространство, где вы можете расслабиться и наконец заговорить на английском.</p>
             <p class="mt-5 text-sm leading-6 text-slate-500">Опыт: более 3 лет преподавания (из них год онлайн), публичная и частная практика.</p>
-            <p class="mt-4 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">Уровень C2</p>
+            <p class="mt-4 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">Уровень C1</p>
           </article>
         </section>
 
@@ -482,7 +482,7 @@ function renderHome() {
         </section>
 
         <section class="grid gap-3 sm:grid-cols-2">
-          <button type="button" data-action="open-trial" class="${btnPrimary}">Записаться на пробный урок</button>
+          <button type="button" data-action="open-trial" class="${btnPrimary}">Записаться на бесплатный пробный урок</button>
           <button type="button" data-action="open-login" class="${btnSoft}">Я уже являюсь учеником!</button>
         </section>
       </main>
@@ -913,8 +913,8 @@ function archivedStudentModal() {
   return `
     <div class="space-y-4">
       <h2 class="font-serif text-4xl text-slate-800">Доступ ограничен</h2>
-      <p class="text-sm leading-6 text-slate-600">Ваша учетная запись находится в архиве. Для возобновления занятий, пожалуйста, заполните общую форму «Записаться на пробный урок» на главной странице.</p>
-      <button type="button" data-action="open-trial" class="${btnPrimary}">Записаться на пробный урок</button>
+      <p class="text-sm leading-6 text-slate-600">Ваша учетная запись находится в архиве. Для возобновления занятий, пожалуйста, заполните общую форму «Записаться на бесплатный пробный урок» на главной странице.</p>
+      <button type="button" data-action="open-trial" class="${btnPrimary}">Записаться на бесплатный пробный урок</button>
       <button type="button" data-action="close-modal" class="${btnSoft}">Закрыть</button>
     </div>`;
 }
