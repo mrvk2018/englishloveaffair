@@ -647,13 +647,20 @@ function renderSchedule() {
         const when = `${date}T${hour}:00:00`;
         const slot = (byDate.get(date) || []).find((item) => item.time === `${hour}:00`);
         if (slot?.status === "booked") {
+          const label = `${formatDay(date)} ${hour}:00`;
           return `
-            <div class="flex items-center justify-between gap-3 rounded-2xl bg-red-50 px-3 py-3">
-              <div>
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-red-50 px-3 py-3 sm:gap-3">
+              <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-red-600">${hour}:00</p>
-                <p class="text-sm text-red-600">${esc(slot.student_name || "Ученик")}</p>
+                <p class="truncate text-sm text-red-600">${esc(slot.student_name || "Ученик")}</p>
               </div>
-              <span class="text-xs text-red-600">занято</span>
+              <button
+                type="button"
+                data-action="cancel-booking"
+                data-id="${slot.id}"
+                data-label="${esc(label)}"
+                class="shrink-0 rounded-xl bg-white px-3 py-2 text-sm font-medium text-red-600 shadow-sm transition hover:bg-red-100"
+              >Снять бронь</button>
             </div>`;
         }
         if (slot?.status === "free") {
@@ -818,6 +825,7 @@ function renderModal() {
     "show-code": codeModal,
     archive: archiveModal,
     "archived-student": archivedStudentModal,
+    "confirm-booking": confirmBookingModal,
   }[type];
   modalRoot.innerHTML = sheet(panel ? panel() : "");
   const focus = modalRoot.querySelector("[autofocus]");
@@ -916,6 +924,20 @@ function archivedStudentModal() {
       <p class="text-sm leading-6 text-slate-600">Ваша учетная запись находится в архиве. Для возобновления занятий, пожалуйста, заполните общую форму «Записаться на бесплатный пробный урок» на главной странице.</p>
       <button type="button" data-action="open-trial" class="${btnPrimary}">Записаться на бесплатный пробный урок</button>
       <button type="button" data-action="close-modal" class="${btnSoft}">Закрыть</button>
+    </div>`;
+}
+
+function confirmBookingModal() {
+  const label = state.modal.label || "";
+  const id = state.modal.id;
+  return `
+    <div class="space-y-4">
+      <h2 class="font-serif text-4xl text-slate-800">Запись на урок</h2>
+      <p class="text-sm leading-6 text-slate-600">
+        Вы выбрали: <span class="font-medium text-slate-800">${esc(label)}</span>
+      </p>
+      <button type="button" data-action="confirm-book-slot" data-id="${id}" data-label="${esc(label)}" class="${btnPrimary}">Подтвердить запись</button>
+      <button type="button" data-action="close-modal" class="${btnSoft}">Отмена</button>
     </div>`;
 }
 
@@ -1053,7 +1075,12 @@ function onClick(event) {
       state.selectedDate = "";
       render();
     },
-    "book-slot": () => guard(() => bookSlot(node)),
+    "book-slot": () => openModal("confirm-booking", { id: Number(node.dataset.id), label: node.dataset.label }),
+    "confirm-book-slot": () =>
+      guard(async () => {
+        await bookSlot(node);
+        closeModal();
+      }),
     "open-tab": () =>
       guard(async () => {
         state.adminTab = node.dataset.tab;
@@ -1065,6 +1092,7 @@ function onClick(event) {
       render();
     },
     "toggle-slot": () => guard(() => toggleSlot(node)),
+    "cancel-booking": () => guard(() => cancelAdminBooking(node)),
     "approve-request": () => guard(() => approveRequest(node.dataset.id)),
     "toggle-archive": () => {
       state.archiveOpen = !state.archiveOpen;
@@ -1244,6 +1272,36 @@ async function bookSlot(node) {
   rememberStudent(state.student);
   await loadStudentSlots({ quiet: true });
   toast(`Урок забронирован: ${node.dataset.label}`);
+}
+
+async function cancelAdminBooking(node) {
+  ensureAdmin();
+  const slotId = Number(node.dataset.id);
+  const slot = await query(supabase.from("slots").select("*").eq("id", slotId).maybeSingle());
+  if (!slot || slot.status !== "booked") throw new Error("Бронь уже снята");
+
+  const released = await query(
+    supabase.from("slots").update({ status: "free", student_id: null }).eq("id", slotId).eq("status", "booked").select().maybeSingle()
+  );
+  if (!released) throw new Error("Бронь уже снята");
+
+  let refunded = false;
+  if (slot.student_id) {
+    const student = await query(supabase.from("students").select("id, lessons_balance").eq("id", slot.student_id).maybeSingle());
+    if (student) {
+      await query(
+        supabase.from("students").update({ lessons_balance: student.lessons_balance + 1 }).eq("id", student.id).select().single()
+      );
+      refunded = true;
+    }
+  }
+
+  state.slotsPayload = await loadSlots({ withNames: true });
+  applyCalendarMeta();
+  render();
+  const label = node.dataset.label ? `: ${node.dataset.label}` : "";
+  const note = refunded ? "Урок возвращён на баланс" : "Слот освобождён";
+  toast(`Бронь снята${label}. ${note}`, "success");
 }
 
 async function toggleSlot(node) {
