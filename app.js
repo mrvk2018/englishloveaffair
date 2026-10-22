@@ -352,6 +352,18 @@ async function postTelegramMessage(token, adminId, text) {
   if (!response.ok) throw fail("Не удалось доставить сообщение преподавателю. Попробуйте ещё раз чуть позже", 502);
 }
 
+/** Уведомление преподавателю; запись в Supabase уже сохранена — ошибки Telegram не показываем ученику. */
+async function notifyAdminTelegram(text) {
+  try {
+    const settings = await readSettingsRow();
+    const { token, adminId } = telegramCredentials(settings);
+    if (!token || !adminId) return;
+    await postTelegramMessage(token, adminId, text);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Проверка доставки: в консоли браузера — await sendTestTelegramMessage() */
 async function sendTestTelegramMessage() {
   const settings = await readSettingsRow();
@@ -1157,16 +1169,19 @@ async function submitTrial(form) {
     setModalError("Укажите название мессенджера");
     return;
   }
-  await query(
-    supabase.from("requests").insert({
-      name: String(data.get("name") || "").trim(),
-      phone: String(data.get("phone") || "").trim(),
-      messenger_type: messenger,
-      custom_messenger_text: messenger === "Custom" ? custom : null,
-      language_level: String(data.get("language_level") || "").trim(),
-      timezone: String(data.get("timezone") || "").trim(),
-      schedule_wishes: String(data.get("schedule_wishes") || "").trim(),
-    })
+  const payload = {
+    name: String(data.get("name") || "").trim(),
+    phone: String(data.get("phone") || "").trim(),
+    messenger_type: messenger,
+    custom_messenger_text: messenger === "Custom" ? custom : null,
+    language_level: String(data.get("language_level") || "").trim(),
+    timezone: String(data.get("timezone") || "").trim(),
+    schedule_wishes: String(data.get("schedule_wishes") || "").trim(),
+  };
+  await query(supabase.from("requests").insert(payload));
+  const messengerLine = messengerFromRequest(payload);
+  await notifyAdminTelegram(
+    `📝 Новая заявка на пробный урок\n${payload.name} · ${payload.phone}\n${messengerLine}\nУровень: ${payload.language_level}\nЧасовой пояс: ${payload.timezone}\nПожелания: ${payload.schedule_wishes}`
   );
   closeModal();
   toast("Заявка отправлена. Скоро свяжусь с вами.");
@@ -1251,7 +1266,13 @@ async function bookSlot(node) {
   if (slot.status === "booked") throw new Error("Это время уже занято");
   if (slot.status !== "free") throw new Error("Слот недоступен для записи");
   const booked = await query(
-    supabase.from("slots").update({ status: "booked", student_id: student.id }).eq("id", slot.id).eq("status", "free").select().maybeSingle()
+    supabase
+      .from("slots")
+      .update({ status: "booked", student_id: student.id, reminder_sent: false })
+      .eq("id", slot.id)
+      .eq("status", "free")
+      .select()
+      .maybeSingle()
   );
   if (!booked) throw new Error("Это время только что заняли");
   const charged = await query(
@@ -1271,7 +1292,11 @@ async function bookSlot(node) {
   state.student.lessons_balance = charged.lessons_balance;
   rememberStudent(state.student);
   await loadStudentSlots({ quiet: true });
-  toast(`Урок забронирован: ${node.dataset.label}`);
+  const label = node.dataset.label || when.replace("T", " ").slice(0, 16);
+  await notifyAdminTelegram(
+    `📅 Новая запись на урок\n${student.name} (${student.access_code})\n${label}\nБаланс после записи: ${charged.lessons_balance} ${lessonWord(charged.lessons_balance)}`
+  );
+  toast(`Урок забронирован: ${label}`);
 }
 
 async function cancelAdminBooking(node) {
@@ -1281,7 +1306,13 @@ async function cancelAdminBooking(node) {
   if (!slot || slot.status !== "booked") throw new Error("Бронь уже снята");
 
   const released = await query(
-    supabase.from("slots").update({ status: "free", student_id: null }).eq("id", slotId).eq("status", "booked").select().maybeSingle()
+    supabase
+      .from("slots")
+      .update({ status: "free", student_id: null, reminder_sent: false })
+      .eq("id", slotId)
+      .eq("status", "booked")
+      .select()
+      .maybeSingle()
   );
   if (!released) throw new Error("Бронь уже снята");
 
