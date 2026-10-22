@@ -1266,13 +1266,7 @@ async function bookSlot(node) {
   if (slot.status === "booked") throw new Error("Это время уже занято");
   if (slot.status !== "free") throw new Error("Слот недоступен для записи");
   const booked = await query(
-    supabase
-      .from("slots")
-      .update({ status: "booked", student_id: student.id, reminder_sent: false })
-      .eq("id", slot.id)
-      .eq("status", "free")
-      .select()
-      .maybeSingle()
+    supabase.from("slots").update({ status: "booked", student_id: student.id }).eq("id", slot.id).eq("status", "free").select().maybeSingle()
   );
   if (!booked) throw new Error("Это время только что заняли");
   const charged = await query(
@@ -1306,13 +1300,7 @@ async function cancelAdminBooking(node) {
   if (!slot || slot.status !== "booked") throw new Error("Бронь уже снята");
 
   const released = await query(
-    supabase
-      .from("slots")
-      .update({ status: "free", student_id: null, reminder_sent: false })
-      .eq("id", slotId)
-      .eq("status", "booked")
-      .select()
-      .maybeSingle()
+    supabase.from("slots").update({ status: "free", student_id: null }).eq("id", slotId).eq("status", "booked").select().maybeSingle()
   );
   if (!released) throw new Error("Бронь уже снята");
 
